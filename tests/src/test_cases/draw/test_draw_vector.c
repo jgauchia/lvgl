@@ -1,8 +1,20 @@
 #if LV_BUILD_TEST
 #include "../lvgl.h"
-#include "lv_test_helpers.h"
+#include "../../lvgl_private.h"
+
 
 #include "unity/unity.h"
+
+/*Bypassing resolution check*/
+#define TEST_DISPLAY_ROTATION_ASSERT_EQUAL_SCREENSHOT(path) TEST_ASSERT_MESSAGE(lv_test_screenshot_compare(path), path);
+
+#ifndef NON_AMD64_BUILD
+    #define EXT_NAME ".lp64.png"
+#else
+    #define EXT_NAME ".lp32.png"
+#endif
+
+typedef void (*draw_cb_t)(lv_layer_t *, const lv_matrix_t *);
 
 void setUp(void)
 {
@@ -11,21 +23,23 @@ void setUp(void)
 
 void tearDown(void)
 {
-    /* Function run after every test */
+    lv_obj_clean(lv_screen_active());
 }
 
-static void draw_shapes(lv_layer_t * layer)
+static void draw_shapes(lv_layer_t * layer, const lv_matrix_t * transform)
 {
     lv_vector_dsc_t * ctx = lv_vector_dsc_create(layer);
+    lv_vector_dsc_set_transform(ctx, transform);
 
     lv_area_t rect = {0, 0, 640, 480};
     lv_vector_dsc_set_fill_color(ctx, lv_color_white());
+    rect = lv_matrix_transform_area(transform, &rect);
     lv_vector_clear_area(ctx, &rect);
 
     lv_vector_path_t * path = lv_vector_path_create(LV_VECTOR_PATH_QUALITY_MEDIUM);
 
     lv_area_t rect1 = {50, 50, 150, 150};
-    lv_vector_dsc_identity(ctx);
+    lv_vector_dsc_set_transform(ctx, transform);
     lv_vector_path_clear(path);
     lv_vector_path_append_rect(path, &rect1, 0, 0);
     lv_vector_dsc_set_fill_color(ctx, lv_color_make(0xff, 0x00, 0x00));
@@ -44,26 +58,27 @@ static void draw_shapes(lv_layer_t * layer)
     lv_vector_dsc_set_fill_color32(ctx, lv_color_to_32(lv_color_make(0x00, 0xff, 0x00), 0x80));
     lv_vector_dsc_add_path(ctx, path);
 
-    lv_vector_dsc_identity(ctx);
+    lv_vector_dsc_set_transform(ctx, transform);
     lv_vector_dsc_translate(ctx, 0, 150);
 
-    lv_grad_dsc_t grad;
-    grad.dir = LV_GRAD_DIR_HOR;
-    grad.stops_count = 2;
-    grad.stops[0].color = lv_color_hex(0xffffff);
-    grad.stops[0].opa = LV_OPA_COVER;
-    grad.stops[0].frac = 0;
-    grad.stops[1].color = lv_color_hex(0x000000);
-    grad.stops[1].opa = LV_OPA_COVER;
-    grad.stops[1].frac = 255;
+    lv_grad_stop_t stops[2];
+    lv_memzero(stops, sizeof(stops));
+    stops[0].color = lv_color_hex(0xffffff);
+    stops[0].opa = LV_OPA_COVER;
+    stops[0].frac = 0;
+    stops[1].color = lv_color_hex(0x000000);
+    stops[1].opa = LV_OPA_COVER;
+    stops[1].frac = 255;
 
     lv_matrix_t mt;
     lv_matrix_identity(&mt);
     lv_vector_dsc_set_fill_transform(ctx, &mt);
-    lv_vector_dsc_set_fill_radial_gradient(ctx, &grad, 50, 50, 50, LV_VECTOR_GRADIENT_SPREAD_PAD);
+    lv_vector_dsc_set_fill_radial_gradient(ctx, 100, 100, 50);
+    lv_vector_dsc_set_fill_gradient_color_stops(ctx, stops, 2);
+    lv_vector_dsc_set_fill_gradient_spread(ctx, LV_VECTOR_GRADIENT_SPREAD_PAD);
     lv_vector_dsc_add_path(ctx, path);
 
-    lv_vector_dsc_identity(ctx);
+    lv_vector_dsc_set_transform(ctx, transform);
     lv_vector_dsc_translate(ctx, 150, 150);
     lv_draw_image_dsc_t img_dsc;
     lv_draw_image_dsc_init(&img_dsc);
@@ -79,7 +94,7 @@ static void draw_shapes(lv_layer_t * layer)
     lv_vector_dsc_set_fill_transform(ctx, &mt);
     lv_vector_dsc_add_path(ctx, path);
 
-    lv_vector_dsc_identity(ctx);
+    lv_vector_dsc_set_transform(ctx, transform);
     lv_vector_dsc_translate(ctx, 300, 150);
     lv_vector_dsc_set_fill_color(ctx, lv_color_make(0xff, 0x00, 0x00));
     lv_vector_dsc_add_path(ctx, path);
@@ -95,13 +110,14 @@ static void draw_shapes(lv_layer_t * layer)
     lv_vector_dsc_add_path(ctx, path);
 
     lv_vector_path_clear(path);
-    lv_vector_dsc_identity(ctx);
+    lv_vector_dsc_set_transform(ctx, transform);
     lv_vector_dsc_set_blend_mode(ctx, LV_VECTOR_BLEND_SRC_OVER);
 
     rect = (lv_area_t) {
         500, 50, 550, 100
     };
     lv_vector_dsc_set_fill_color(ctx, lv_color_lighten(lv_color_black(), 50));
+    rect = lv_matrix_transform_area(transform, &rect);
     lv_vector_clear_area(ctx, &rect); // clear screen
 
     lv_fpoint_t p = {500, 100}; /* Center */
@@ -126,17 +142,35 @@ static void draw_shapes(lv_layer_t * layer)
     lv_vector_path_append_arc(path, &p, 50, 45, 45, true);
     lv_vector_dsc_add_path(ctx, path); // draw a path
 
+    /* Test image filling with absolute coordinates */
+    lv_vector_dsc_set_transform(ctx, transform);
+    lv_vector_dsc_set_fill_units(ctx, LV_VECTOR_FILL_UNITS_USER_SPACE_ON_USE);
+    lv_vector_dsc_set_fill_image(ctx, &img_dsc);
+    lv_vector_dsc_set_fill_opa(ctx, LV_OPA_50);
+    lv_vector_dsc_set_stroke_opa(ctx, LV_OPA_TRANSP);
+    lv_matrix_identity(&mt);
+    lv_matrix_translate(&mt, 50, 350);
+    lv_vector_dsc_set_fill_transform(ctx, &mt);
+
+    lv_vector_path_clear(path);
+    /* Aligned with translate. Image resolution is 100x100, cropped to 50% of width and height */
+    lv_area_t img_area = {50, 350, 50 + 50, 350 + 50};
+    lv_vector_path_append_rect(path, &img_area, 0, 0);
+    lv_vector_dsc_add_path(ctx, path);
+
     lv_draw_vector(ctx);
     lv_vector_path_delete(path);
     lv_vector_dsc_delete(ctx);
 }
 
-static void draw_lines(lv_layer_t * layer)
+static void draw_lines(lv_layer_t * layer, const lv_matrix_t * transform)
 {
     lv_vector_dsc_t * ctx = lv_vector_dsc_create(layer);
+    lv_vector_dsc_set_transform(ctx, transform);
 
     lv_area_t rect = {0, 0, 640, 480};
     lv_vector_dsc_set_fill_color(ctx, lv_color_white());
+    rect = lv_matrix_transform_area(transform, &rect);
     lv_vector_clear_area(ctx, &rect);
 
     lv_vector_path_t * path = lv_vector_path_create(LV_VECTOR_PATH_QUALITY_MEDIUM);
@@ -188,7 +222,7 @@ static void draw_lines(lv_layer_t * layer)
     lv_vector_dsc_add_path(ctx, path);
 
     lv_fpoint_t pts5[] = {{50, 300}, {150, 300}};
-    lv_vector_dsc_identity(ctx);
+    lv_vector_dsc_set_transform(ctx, transform);
     lv_vector_path_clear(path);
     lv_vector_path_move_to(path, &pts5[0]);
     lv_vector_path_line_to(path, &pts5[1]);
@@ -204,19 +238,18 @@ static void draw_lines(lv_layer_t * layer)
     lv_vector_dsc_add_path(ctx, path);
 
     lv_area_t rect1 = {250, 300, 350, 400};
-    lv_vector_dsc_identity(ctx);
+    lv_vector_dsc_set_transform(ctx, transform);
     lv_vector_path_clear(path);
     lv_vector_path_append_rect(path, &rect1, 0, 0);
 
-    lv_grad_dsc_t grad;
-    grad.dir = LV_GRAD_DIR_HOR;
-    grad.stops_count = 2;
-    grad.stops[0].color = lv_color_hex(0xff0000);
-    grad.stops[0].opa = LV_OPA_COVER;
-    grad.stops[0].frac = 0;
-    grad.stops[1].color = lv_color_hex(0x00ff00);
-    grad.stops[1].opa = LV_OPA_COVER;
-    grad.stops[1].frac = 255;
+    lv_grad_stop_t stops[2];
+    lv_memzero(stops, sizeof(stops));
+    stops[0].color = lv_color_hex(0xff0000);
+    stops[0].opa = LV_OPA_COVER;
+    stops[0].frac = 0;
+    stops[1].color = lv_color_hex(0x00ff00);
+    stops[1].opa = LV_OPA_COVER;
+    stops[1].frac = 255;
 
     lv_matrix_t mt;
     lv_matrix_identity(&mt);
@@ -224,7 +257,9 @@ static void draw_lines(lv_layer_t * layer)
     lv_matrix_translate(&mt, 20, 20);
     lv_vector_dsc_set_stroke_transform(ctx, &mt);
     lv_vector_dsc_set_stroke_join(ctx, LV_VECTOR_STROKE_JOIN_MITER);
-    lv_vector_dsc_set_stroke_linear_gradient(ctx, &grad, LV_VECTOR_GRADIENT_SPREAD_REFLECT);
+    lv_vector_dsc_set_stroke_linear_gradient(ctx, 250, 300, 350, 300);
+    lv_vector_dsc_set_stroke_gradient_color_stops(ctx, stops, 2);
+    lv_vector_dsc_set_stroke_gradient_spread(ctx, LV_VECTOR_GRADIENT_SPREAD_REFLECT);
     lv_vector_dsc_add_path(ctx, path); // draw a path
 
     lv_draw_vector(ctx);
@@ -232,29 +267,33 @@ static void draw_lines(lv_layer_t * layer)
     lv_vector_dsc_delete(ctx);
 }
 
-static void canvas_draw(const char * name, void (*draw_cb)(lv_layer_t *))
+static void canvas_draw(const char * name, draw_cb_t draw_cb)
 {
+    LV_UNUSED(name);
     lv_obj_t * canvas = lv_canvas_create(lv_screen_active());
-    uint32_t stride = 640 * 4 + 128; /*Test non-default stride*/
-    lv_draw_buf_t * draw_buf = lv_draw_buf_create(640, 480, LV_COLOR_FORMAT_ARGB8888, stride);
+    lv_draw_buf_t * draw_buf = lv_draw_buf_create(640, 480, LV_COLOR_FORMAT_ARGB8888, LV_STRIDE_AUTO);
     TEST_ASSERT_NOT_NULL(draw_buf);
+
+    lv_draw_buf_clear(draw_buf, NULL);
     lv_canvas_set_draw_buf(canvas, draw_buf);
+    lv_canvas_fill_bg(canvas, lv_color_make(0xff, 0xff, 0xff), 255);
 
     lv_layer_t layer;
     lv_canvas_init_layer(canvas, &layer);
 
-    draw_cb(&layer);
+    lv_matrix_t matrix;
+    lv_matrix_identity(&matrix);
+    draw_cb(&layer, &matrix);
 
     lv_canvas_finish_layer(canvas, &layer);
 
-#ifndef NON_AMD64_BUILD
     char fn_buf[64];
-    lv_snprintf(fn_buf, sizeof(fn_buf), "draw/vector_%s.png", name);
+    lv_snprintf(fn_buf, sizeof(fn_buf), "draw/vector_%s" EXT_NAME, name);
     TEST_ASSERT_EQUAL_SCREENSHOT(fn_buf);
-#endif
+
     lv_image_cache_drop(draw_buf);
     lv_draw_buf_destroy(draw_buf);
-    lv_obj_del(canvas);
+    lv_obj_delete(canvas);
 }
 
 void test_transform(void)
@@ -295,4 +334,72 @@ void test_draw_shapes(void)
 {
     canvas_draw("draw_shapes", draw_shapes);
 }
+
+static void event_cb(lv_event_t * e)
+{
+    lv_layer_t * layer = lv_event_get_layer(e);
+    lv_obj_t * obj = lv_event_get_current_target_obj(e);
+    draw_cb_t draw_cb = (draw_cb_t)(lv_uintptr_t)lv_event_get_user_data(e);
+    LV_ASSERT_NULL(draw_cb);
+
+    lv_matrix_t matrix;
+    lv_matrix_identity(&matrix);
+    lv_matrix_translate(&matrix, obj->coords.x1, obj->coords.y1);
+    draw_cb(layer, &matrix);
+}
+
+static void draw_during_rendering(const char * name, draw_cb_t draw_cb)
+{
+    lv_obj_t * obj = lv_obj_create(lv_screen_active());
+    lv_obj_set_size(obj, lv_pct(90), lv_pct(90));
+    lv_obj_center(obj);
+    lv_obj_add_event_cb(obj, event_cb, LV_EVENT_DRAW_MAIN, (void *)(lv_uintptr_t)draw_cb);
+
+    char fn_buf[128];
+    lv_snprintf(fn_buf, sizeof(fn_buf), "draw/vector_draw_%s_during_rendering" EXT_NAME, name);
+
+    TEST_DISPLAY_ROTATION_ASSERT_EQUAL_SCREENSHOT(fn_buf);
+
+    lv_obj_delete(obj);
+}
+
+void test_draw_during_rendering(void)
+{
+    draw_during_rendering("shapes", draw_shapes);
+    draw_during_rendering("lines", draw_lines);
+}
+
+void test_draw_display_matrix_rotation(void)
+{
+#if LV_DRAW_TRANSFORM_USE_MATRIX
+    lv_display_t * disp = lv_display_get_default();
+    lv_display_set_matrix_rotation(disp, true);
+    TEST_ASSERT_TRUE(lv_display_get_matrix_rotation(disp));
+
+    lv_display_set_rotation(disp, LV_DISPLAY_ROTATION_0);
+    draw_during_rendering("shapes_disp_rotation_0", draw_shapes);
+    draw_during_rendering("lines_disp_rotation_0", draw_lines);
+
+    lv_display_set_rotation(disp, LV_DISPLAY_ROTATION_90);
+    draw_during_rendering("shapes_disp_rotation_90", draw_shapes);
+    draw_during_rendering("lines_disp_rotation_90", draw_lines);
+
+    lv_display_set_rotation(disp, LV_DISPLAY_ROTATION_180);
+    draw_during_rendering("shapes_disp_rotation_180", draw_shapes);
+    draw_during_rendering("lines_disp_rotation_180", draw_lines);
+
+    lv_display_set_rotation(disp, LV_DISPLAY_ROTATION_270);
+    draw_during_rendering("shapes_disp_rotation_270", draw_shapes);
+    draw_during_rendering("lines_disp_rotation_270", draw_lines);
+
+    lv_display_set_matrix_rotation(disp, false);
+    TEST_ASSERT_FALSE(lv_display_get_matrix_rotation(disp));
+    lv_display_set_rotation(disp, LV_DISPLAY_ROTATION_0);
+    draw_during_rendering("shapes_disp_rotation_0", draw_shapes);
+    draw_during_rendering("lines_disp_rotation_0", draw_lines);
+#else
+    TEST_PASS();
+#endif
+}
+
 #endif
